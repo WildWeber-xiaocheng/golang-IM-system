@@ -3,25 +3,68 @@ package main
 import (
 	"fmt"
 	"net"
+	"sync"
 )
 
 type Server struct {
 	IP   string
 	Port int
+
+	//在线用户列表 key是用户名 value是用户实例
+	OnlineMap map[string]*User
+	//读写锁，用于互斥访问OnlineMap
+	mapLock sync.RWMutex
+
+	//消息广播的channel
+	Message chan string
 }
 
 // Server的构造器
 func NewServer(ip string, port int) *Server {
 	server := &Server{
-		IP:   ip,
-		Port: port,
+		IP:        ip,
+		Port:      port,
+		OnlineMap: make(map[string]*User),
+		Message:   make(chan string),
 	}
 	return server
 }
 
+// 监听Message广播消息channel的go程，一旦有消息就发送给全部的在线User
+// 在server启动时就开启
+func (server *Server) ListenMessager() {
+	for {
+		msg := <-server.Message
+		//将msg发送给全部的在线User
+		server.mapLock.Lock()
+		for _, user := range server.OnlineMap {
+			user.Channel <- msg
+		}
+		server.mapLock.Unlock()
+
+	}
+}
+
+// 将消息传入到server channel中
+func (server *Server) BroadCast(user *User, msg string) {
+	sendMsg := "[" + user.Addr + "]" + user.Name + ":" + msg
+	server.Message <- sendMsg
+}
+
 // 处理业务
 func (server *Server) Handler(conn net.Conn) {
-	fmt.Println("New connection from ", conn.RemoteAddr())
+	//fmt.Println("New connection from ", conn.RemoteAddr())
+	user := NewUser(conn)
+	//用户上线，将用户加入到OnlineMap
+	server.mapLock.Lock()
+	server.OnlineMap[user.Name] = user
+	server.mapLock.Unlock()
+
+	//广播当前用户上线消息
+	server.BroadCast(user, "已上线")
+
+	//当前handler阻塞，如果不阻塞，则执行完上条语句后，该go程直接结束了
+	select {}
 }
 
 // 启动服务器
@@ -34,6 +77,9 @@ func (server *Server) Start() {
 	}
 	//close listen socket
 	defer listener.Close()
+
+	//启动监听Message的go程
+	go server.ListenMessager()
 
 	for {
 		conn, err := listener.Accept()
