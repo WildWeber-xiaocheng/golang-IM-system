@@ -55,14 +55,17 @@ func (server *Server) BroadCast(user *User, msg string) {
 // 处理业务
 func (server *Server) Handler(conn net.Conn) {
 	//fmt.Println("New connection from ", conn.RemoteAddr())
-	user := NewUser(conn)
-	//用户上线，将用户加入到OnlineMap
-	server.mapLock.Lock()
-	server.OnlineMap[user.Name] = user
-	server.mapLock.Unlock()
+	user := NewUser(conn, server)
 
-	//广播当前用户上线消息
-	server.BroadCast(user, "已上线")
+	//用户上线
+	user.Online()
+	////用户上线，将用户加入到OnlineMap
+	//server.mapLock.Lock()
+	//server.OnlineMap[user.Name] = user
+	//server.mapLock.Unlock()
+	//
+	////广播当前用户上线消息
+	//server.BroadCast(user, "已上线")
 
 	//接收客户端发送的消息
 	go func() {
@@ -71,7 +74,9 @@ func (server *Server) Handler(conn net.Conn) {
 			//n表示读出的数据长度
 			n, err := conn.Read(buf) //读数据
 			if n == 0 {
-				server.BroadCast(user, "下线")
+				//下线
+				user.Offline()
+				//server.BroadCast(user, "下线")
 				//退出当前协程
 				return
 			}
@@ -82,8 +87,11 @@ func (server *Server) Handler(conn net.Conn) {
 
 			//提取用户的消息（去除'\n'）
 			msg := string(buf[:n-1])
-			//将得到的消息进行广播
-			server.BroadCast(user, msg)
+
+			//用户对msg进行处理
+			user.DoMessage(msg)
+			////将得到的消息进行广播
+			//server.BroadCast(user, msg)
 		}
 	}()
 
